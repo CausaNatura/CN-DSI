@@ -12,10 +12,10 @@ os.environ["PATH"] = (
     + os.environ["PATH"]
 )
 sys.path.append("/mnt/deps/python-libraries")
-# import whisper
+import whisper
 import numpy as np
 
-# audio_to_text = whisper.load_model("medium", download_root="/mnt/deps/whisper-models")
+audio_to_text = whisper.load_model("medium", download_root="/mnt/deps/whisper-models")
 
 AWS_REGION = "us-east-1"
 S3_BUCKET = "uchicago-causanatura-test"
@@ -88,14 +88,17 @@ def lambda_handler(event, context):
                             )
                             s3.download_file(S3_BUCKET, s3_filename, local_filename)
 
-                            print(os.listdir(td))
-
-                            # message["transcription"] = audio_to_text.transcribe(local_filename)
+                            message["audio_file"] = f"s3://{S3_BUCKET}/{s3_filename}"
+                            message["transcription"] = audio_to_text.transcribe(
+                                local_filename
+                            )
 
                 with tempfile.TemporaryDirectory() as td:
                     full_filename = os.path.join(td, output_filename)
                     with open(full_filename, "w") as output_file:
                         json.dump(message, output_file)
-                    s3.upload_file(full_filename, S3_BUCKET, f"{s3_dir}/{output_filename}")
+                    s3.upload_file(
+                        full_filename, S3_BUCKET, f"{s3_dir}/{output_filename}"
+                    )
 
     return {"statusCode": 200}
