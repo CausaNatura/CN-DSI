@@ -36,3 +36,8 @@ An SNS topic can have more than one subscriber, and you might want to set up an 
 
 ![](README-img/set-up-email-subscription.png)
 
+And then respond to the email with "Confirm subscription." It may be in your spam folder.
+
+![](README-img/set-up-email-subscription-2.png)
+
+Now whenever the WhatsApp Business Account receives a message, you'll get an email containing the JSON structure that will be passed to Lambda.
