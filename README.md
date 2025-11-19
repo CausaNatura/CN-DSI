@@ -137,3 +137,140 @@ Bafck to the "Route tables" list item in the left sidebar, select the private Ro
 Now we have a VPC in which to put the EFS filesystem and the Lambda function.
 
 ## EFS filesystem
+
+When creating an EFS filesystem, select the new VPC, but be sure to click the "Customize" button rather than the orange "Create file system":
+
+![](README-img/efs-step-1.png)
+
+The settings that we need to customize are not on the first page, so click the orange "Next" button to get from "Step 1: File system settings" to "Step 2: Network access." In Step 2, be sure to select the private Subnet.
+
+![](README-img/efs-step-2.png)
+
+Nothing more needs to be configured on "Step 3: File system policy" or "Step 4: Review and create," so click the orange "Create" button. The filesystem takes a moment to create.
+
+Next, go to "Access points" in the left sidebar and press the orange "Create access point" button. It doesn't need any special configuration after choosing the filesystem and naming it, so scroll down to the orange "Create access point" button on the bottom.
+
+![](README-img/efs-step-3.png)
+
+The access point also takes a moment to create.
+
+## Filling the filesystem via EC2
+
+In this step, we will create an Elastic Compute Cloud (EC2) instance and mount the filesystem, just so that we can fill it with data. Actually, we need to create two EC2 instances since the one that mounts the filesystem needs to be in the private Subnet and the one that we can connect to from outside AWS needs to be in the public Subnet.
+
+First, go to the EC2 dashboard and press the orange "Launch instance" button. The instance that will mount the EFS filesystem should be Amazon Linux (they both can be), and very little computational power or memory is needed, so it can be a `t3.micro` insance (the default). If you want to test running Whisper on a sample file, you will need more than the `t3.micro`'s memory (I don't know how much; I haven't tried it). As usual with EC2, you'll need a key pair to be able to SSH to it.
+
+The important part of the configuration is "Network settings." Click "Edit" and select the new VPC, then the public Subnet for the public EC2 instance, private Subnet for the private EC2 instance. On the public EC2 instance only, enable "Auto-assign public IP." For both, "Select existing security group" and pick the default one.
+
+When all of that is set up, press the orange "Launch isntance" button.
+
+![](README-img/ec2-step-1.png)
+
+![](README-img/ec2-step-2.png)
+
+With the default Security Group, you won't be able to SSH in until you add port 22 ot the inbound rules. Click the "Security" tab for the public instance and then the identifier that starts with `sg-` to (temporarily) edit the default Security Group's rules.
+
+![](README-img/ec2-security-group.png)
+
+With that set, you can now go to the public instance's "Details" tab to copy its "Public IPv4 address" and SSH into the instance:
+
+```bash
+mv ~/Downloads/KEY_PAIR_FILE.pem ~/.ssh/
+chmod 400 ~/.ssh/KEY_PAIR_FILE.pem
+ssh -i ~/.ssh/KEY_PAIR_FILE.pem ec2-user@PUBLIC_IPV4_ADDRESS
+```
+
+where `KEY_PAIR_FILE` is the key pair `.pem` file you downloaded from the "Launch instances" setup and `PUBLIC_IPV4_ADDRESS` is the address you copied from the "Details" tab.
+
+Once you've connected to the public instance, you can connect to the private instance by copying the `.pem` file into public instance, setting its permissions with `chmod 400`, and SSHing to the private instance's "Private IPv4 address":
+
+![](README-img/ec2-step-5.png)
+
+On the private instance, install the software needed to mount an EFS drive,
+
+```bash
+sudo yum install -y amazon-efs-utils
+```
+
+and create a mount point (that will be the same as the mount point on the Lambda function):
+
+```bash
+sudo mkdir /mnt/deps
+```
+
+To get the commandline needed to mount the EFS filesystem, go to the Elastic File System GUI, select the filesystem, press the orange "Attach" button, and switch from "Mount via DNS" to "Mount via IP". Be sure the correct Availability Zone is selected (when creating the Subnets, I chose `us-east-1a`), and copy the first `sudo mount` line:
+
+![](README-img/efs-mount-command.png)
+
+Before running the command, replace the last word, `efs`, with the actual mount point, `/mnt/deps`. Now it should be mounted:
+
+```bash
+df -h /mnt/deps
+```
+
+should return something like
+
+```
+Filesystem      Size  Used Avail Use% Mounted on
+10.0.1.179:/    8.0E     0  8.0E   0% /mnt/deps
+```
+
+(8.0 exabytes is a theoretical maximum because this filesystem adjusts its size to its contents.) To access files in the system, grant the login user ownership of it:
+
+```bash
+sudo chown ec2-user /mnt/deps
+sudo chgrp ec2-user /mnt/deps
+```
+
+The filesystem should be set up with three subdirectories,
+* `binary-dependencies`: just ffmpeg, an executable Whisper uses to read the OGG/Opus file format
+* `python-libraries`: Python dependencies, including Whisper
+* `whisper-models`: the speech-to-text ML model
+
+The contents for `binary-dependies` come directly from [https://johnvansickle.com/ffmpeg/builds/ffmpeg-git-amd64-static.tar.xz](https://johnvansickle.com/ffmpeg/builds/ffmpeg-git-amd64-static.tar.xz), expanded such that
+
+```bash
+/mnt/deps/binary-dependencies/ffmpeg-git-20240629-amd64-static/ffmpeg
+```
+
+is a full path to the executable.
+
+If Python 3.13 is installed, the `python-libraries` can be set up with
+
+```bash
+pip install --target /mnt/deps/python-libraries torch --index-url https://download.pytorch.org/whl/cpu
+pip install --target /mnt/deps/python-libraries more-itertools numba numpy tiktoken tqdm
+pip install --target /mnt/deps/python-libraries --no-deps openai-whisper  # avoid installing Triton
+
+python -c 'import sys; sys.path.append("/mnt/deps/python-libraries"); import whisper'
+```
+
+(The `pip` command might be `pip3` or `pip3.13` and the `python` command might be `python3` or `python3.13`.) The last line creates `__pycache__` directories for all of the dependencies, so that Lambda doesn't have to.
+
+To fill the `whisper-models`, you can start Python and run
+
+```python
+import sys
+sys.path.append("/mnt/deps/python-libraries")
+import whisper'
+model = whisper.load_model("medium", download_root="/mnt/deps/whisper-models")
+```
+
+It's about 1.5 GB. Furthermore, you can test the Whisper installation outside of Lambda by copying an OGG file to the EC2 instance and running
+
+```python
+model.transcribe("sample.ogg")
+```
+
+in Python, but this requires more RAM than a `t3.micro` instance (I don't know how much; I haven't tried it). This also ensures that any lazy-loaded modules get `__pycache__` directories.
+
+All of the files that the EFS filesystem needs are in a tarball named `all-files-in-deps.tar` in the S3 bucket (to be discussed later), so you'd only need to create it from scratch if you want to change the Lambda function's runtime from Python 3.13 to another version of Python.
+
+After the EFS filesystem has been filled, you can "Terminate" the EC2 instances,
+
+![](README-img/ec2-terminate.png)
+
+and you can remove the SSH inbound rule in the Security Group, unless some other project is using it.
+
+![](README-img/ec2-security-group-2.png)
+
