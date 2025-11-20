@@ -264,7 +264,7 @@ model.transcribe("sample.ogg")
 
 in Python, but this requires more RAM than a `t3.micro` instance (I don't know how much; I haven't tried it). This also ensures that any lazy-loaded modules get `__pycache__` directories.
 
-All of the files that the EFS filesystem needs are in a tarball named `all-files-in-deps.tar` in the S3 bucket (to be discussed later), so you'd only need to create it from scratch if you want to change the Lambda function's runtime from Python 3.13 to another version of Python.
+All of the files that the EFS filesystem needs are in a tarball named `all-files-in-deps.tar` in the `causanatura-roc-transcriptions` S3 bucket (to be discussed later), so you'd only need to create it from scratch if you want to change the Lambda function's runtime from Python 3.13 to another version of Python.
 
 After the EFS filesystem has been filled, you can "Terminate" the EC2 instances,
 
@@ -274,3 +274,157 @@ and you can remove the SSH inbound rule in the Security Group, unless some other
 
 ![](README-img/ec2-security-group-2.png)
 
+## Lambda
+
+Now we can _finally_ make the Lambda function. Almost. First, it needs an IAM Role. In the "Identity and Access Management (IAM)" dashboard (not the "IAM Identity Center"), select "Roles" from the left sidebar and use the orange button on the top-right to "Create role." In "Step 1: Select trusted entity," choose the "Lambda" service:
+
+![](README-img/iam-role-1.png)
+
+Skip past "Step 2: Add permissions" by clicking the orange "Next" button on the bottom. We'll set the permissions with a JSON document. In "Step 3: Name, review, and create," just name the Role and press the orange "Create role" button on the bottom.
+
+Now select the newly created role and use Add permissions > Create inline policy:
+
+![](README-img/iam-role-2.png)
+
+and then switch from the "Visual" to the "JSON" Policy editor:
+
+![](README-img/iam-role-3.png)
+
+Replace the entire contents of the JSON document with the following:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "WhatsAppMediaDownload",
+            "Effect": "Allow",
+            "Action": "social-messaging:GetWhatsAppMessageMedia",
+            "Resource": "arn:aws:social-messaging:us-east-1:570551708935:phone-number-id/*"
+        },
+        {
+            "Sid": "ReadWriteS3Bucket",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::uchicago-causanatura-test/*"
+        },
+        {
+            "Sid": "BasicLogging",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateNetworkInterface",
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:DeleteNetworkInterface"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+Then click the orange "Next" button at the bottom.
+
+![](README-img/iam-role-4.png)
+
+Give the policy a name and click the orange "Create policy" button at the bottom.
+
+Now go to the Lambda GUI and press the orange "Create function" button. Several things need to be configured:
+* the "Runtime" _must be_ "Python 3.13" (unless you've changed the `python-dependencies` in the EFS filesystem)
+* the "Architecture" _must be_ "x86_64" (unless you've changed the `binary-dependencies` and `python-dependencies` in the EFS filesystem)
+* open the "Change default execution role" drop-down and "Use an existing role," then select the Role described above.
+
+When all of that is set up, press the orange "Create function" button at the bottom.
+
+![](README-img/lambda-1.png)
+
+Before configuring the code, let's set things up in the "Configuration" tab. Under "Triggers" (left sidebar), press "Add trigger." In the trigger configuration, select "SNS" and choose the SNS topic created above, then press the orange "Add" button.
+
+![](README-img/lambda-2.png)
+
+Under "VPC" (also in the left sidebar), press "Edit." Select the new VPC, private Subnet, and default Security Group, then press the orange "Save" button.
+
+![](README-img/lambda-3.png)
+
+Under "File system" (also in the left sidebar), press "Add file system." Select the new EFS filesystem, its only Access Point, and enter
+
+```
+/mnt/deps
+```
+
+as the "Local mount path." Then press the orange "Save" button.
+
+![](README-img/lambda-4.png)
+
+If you do this too quickly after having set the Lambda function's VPC, you'll get an error message saying
+
+```
+The operation cannot be performed at this time. An update is in progress for resource: arn:aws:lambda:us-east-1:338193218192:function:CN_DSI_Lambda
+```
+
+Just wait until the blue "Updating the function..." banner at the top of the page becomes a green "Successfully updated the function..." banner, then press "Save."
+
+To verify that the EFS filesystem is attached, switch to the "Code" tab and replace the `lambda_function.py` content with the following:
+
+```python
+import os
+
+def lambda_handler(event, context):
+    return {
+        'statusCode': 200,
+        'body': os.listdir("/mnt/deps"),
+    }
+```
+
+Press the blue "Deploy" button and when it's ready, press the blue "Test" button. The response should show the `binary-dependencies`, `python-libraries`, and `whisper-models` subdirectories.
+
+To verify that the Lambda function can reach the network outside of its private Subnet, replace the `lambda_function.py` content with the following:
+
+```python
+import urllib.request
+
+def lambda_handler(event, context):
+    with urllib.request.urlopen("https://www.google.com", timeout=5) as response:
+        data = response.read()
+    return {"status": "success", "google": data}
+```
+
+Press "Deploy," wait for it to be fully deployed, then press "Test" and you should see the content of Google's homepage as inline HTML.
+
+Once the Lambda function can see both the EFS filesystem and the outside network, it's ready. Just replace the `lambda_function.py` one last time with the contents of [lambda_function.py](lambda_function.py) (either by uploading a ZIP file or just by copy-paste) and press "Deploy" again. With this function code, the "Test" button (with `test-event-1`) won't work, but a SNS message carrying WhatsApp data would.
+
+## S3 bucket
+
+The S3 bucket is used both for audio files (AWS Social Messaging will _only_ copy audio files to S3, no other location) and final transcription results. I created an S3 bucket named `causanatura-roc-transcriptions` with default parameters (i.e. _not_ public).
+
+In this bucket is the `all-files-in-deps.tar` file, to make it easier to restore data on the EFS filesystem if it has been lost or corrupted.
+
+When WhatsApp messages are received by the Lambda function, it will simply save them in S3 if they are text messages, and it will use Whisper to transcribe the audio if they are voice messages. All outputs are written in S3 in subdirectories labeled by the message's date, to make it easier to delete old messages by date.
+
+![](README-img/s3.png)
+
+## CloudWatch
+
+Log files from Lambda are sent to CloudWatch. In the CloudWatch GUI's left sidebar, select "Logs" and then "Log groups." You should see `/aws/lambda/CN_DSI_Lambda` (the name of the Lambda function) as a Log Group. If you then click on it, you will see Log Streams for each redeployment or reawakening of the Lambda function. The most recent is at the top of the list.
+
+![](README-img/cloudwatch-1.png)
+
+The data in the Log Stream shows all of the standard output of the Lambda function, so you can use `print` statements to debug it.
+
+![](README-img/cloudwatch-2.png)
+
+Tracebacks for Python exceptions also appear here. When everything is working, though, the only logs will be `INIT_START`, `START`, `END`, and `REPORT`.
+
+That's everything!

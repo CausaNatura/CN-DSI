@@ -18,7 +18,7 @@ import numpy as np
 audio_to_text = whisper.load_model("medium", download_root="/mnt/deps/whisper-models")
 
 AWS_REGION = "us-east-1"
-S3_BUCKET = "uchicago-causanatura-test"
+S3_BUCKET = "causanatura-roc-transcriptions"
 
 socialmessaging = boto3.client("socialmessaging", region_name=AWS_REGION)
 s3 = boto3.client("s3", region_name=AWS_REGION)
