@@ -354,7 +354,9 @@ When all of that is set up, press the orange "Create function" button at the bot
 
 ![](README-img/lambda-1.png)
 
-Before configuring the code, let's set things up in the "Configuration" tab. Under "Triggers" (left sidebar), press "Add trigger." In the trigger configuration, select "SNS" and choose the SNS topic created above, then press the orange "Add" button.
+Before configuring the code, let's set things up in the "Configuration" tab. In the "Basic settings," increase the "Memory" to its maximum value, `10240`, increase the "Ephemeral storage" to its maximum value, `10240`, and increase the "Timeout" to its maximum value, `15` minutes and `0` seconds.
+
+Under "Triggers" (left sidebar), press "Add trigger." In the trigger configuration, select "SNS" and choose the SNS topic created above, then press the orange "Add" button.
 
 ![](README-img/lambda-2.png)
 
