@@ -266,6 +266,10 @@ in Python, but this requires more RAM than a `t3.micro` instance (I don't know h
 
 All of the files that the EFS filesystem needs are in a tarball named `all-files-in-deps.tar` in the `causanatura-roc-transcriptions` S3 bucket (to be discussed later), so you'd only need to create it from scratch if you want to change the Lambda function's runtime from Python 3.13 to another version of Python.
 
+It takes a while (many minutes) for the EFS filesystem GUI to update and indicate that it is full of files. When it does so, it would look something like this:
+
+![](README-img/filled-filesystem.png)
+
 After the EFS filesystem has been filled, you can "Terminate" the EC2 instances,
 
 ![](README-img/ec2-terminate.png)
