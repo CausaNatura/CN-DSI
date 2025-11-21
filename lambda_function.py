@@ -15,7 +15,8 @@ sys.path.append("/mnt/deps/python-libraries")
 import whisper
 import numpy as np
 
-audio_to_text = whisper.load_model("medium", download_root="/mnt/deps/whisper-models")
+# assign this in the first lambda_handler call to avoid a 10 second import timeout
+audio_to_text = None
 
 AWS_REGION = "us-east-1"
 S3_BUCKET = "causanatura-roc-transcriptions"
@@ -25,6 +26,11 @@ s3 = boto3.client("s3", region_name=AWS_REGION)
 
 
 def lambda_handler(event, context):
+    global audio_to_text
+    if audio_to_text is None:
+        # usually takes 50 seconds, but only has to be done once per instance
+        audio_to_text = whisper.load_model("medium", download_root="/mnt/deps/whisper-models")
+
     for record in event.get("Records", []):
         sns_message = record.get("Sns", {})
         whatsapp_message = json.loads(sns_message.get("Message", ""))
