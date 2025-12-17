@@ -1,4 +1,6 @@
 import json
+import csv
+import io
 
 import boto3
 
@@ -10,6 +12,7 @@ s3 = boto3.client("s3", region_name=AWS_REGION)
 
 def lambda_handler(event, context):
     results = []
+    fields = ["from", "timestamp", "type", "text", "audio_file", "version"]
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET):
         for content in page["Contents"]:
             s3_filename = content["Key"]
@@ -40,9 +43,18 @@ def lambda_handler(event, context):
                     result["version"] = structure.get("version")
                     for field, value in structure.get("result", {}).items():
                         result[field] = value
+                        if field not in fields:
+                            fields.append(field)
                 else:
                     result["version"] = None
 
                 results.append(result)
 
-    return {"statusCode": 200, "results": results}
+    with io.StringIO() as file:
+        writer = csv.writer(file)
+        writer.writerow(fields)
+        for result in results:
+            writer.writerow([result.get(field) for field in fields])
+        results_csv = file.getvalue()
+
+    return {"statusCode": 200, "results_csv": results_csv, "results_json": results}
