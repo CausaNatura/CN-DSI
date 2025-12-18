@@ -1,0 +1,40 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "WhatsAppMediaDownload",
+            "Effect": "Allow",
+            "Action": "social-messaging:GetWhatsAppMessageMedia",
+            "Resource": "arn:aws:social-messaging:us-east-1:338193218192:phone-number-id/*"
+        },
+        {
+            "Sid": "ReadWriteS3Bucket",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::causanatura-roc-transcriptions/*"
+        },
+        {
+            "Sid": "BasicLogging",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateNetworkInterface",
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:DeleteNetworkInterface"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
